@@ -236,84 +236,61 @@ namespace GR.TaskManager.Services
         /// Get all user task by name and assigned task
         /// </summary>
         /// <returns></returns>
-public async Task<PagedResult<GetTaskViewModel>> GetAllTasksAsync(PageRequest pageRequest = null)
-{
-    IQueryable<Task> query = _dbContext.Tasks.Include(x => x.TaskType).Include(x => x.TaskItems).ThenInclude(x => x.AssignedUsers).Include(x => x.AssignedUsers);
+        public async Task<ResultModel<PagedResult<GetTaskViewModel>>> GetAllTasksAsync(PageRequest request, bool includeDeleted = true) { 
+        
+            var allLeadsRequest = (await _leadService.GetAllLeadsAsync(false)).Result.ToList();
+            var allOrganizationRequest = (await _organizationService.GetAllActiveOrganizationsAsync(false)).Result.ToList();
+            var allAgreementsRequest = (await _agreementService.GetAllAgreementsAsync(false)).Result.ToList();
 
-    if (pageRequest != null)
-    {
-        if (!pageRequest.IncludeDeleted)
-        {
-            query = query.Where(x => !x.IsDeleted);
-        }
+            var query = _context.Tasks
+                .Include(x => x.AssignedUsers)
+                .Include(i => i.TaskType)
+                .Where(x => !x.IsDeleted || includeDeleted);
 
-        if (!string.IsNullOrWhiteSpace(pageRequest.GSearch))
-        {
-            query = query.Where(x => x.Name.Contains(pageRequest.GSearch) ||
-                                     x.Description.Contains(pageRequest.GSearch) ||
-                                     x.TaskNumber.Contains(pageRequest.GSearch));
-        }
 
-        if (!string.IsNullOrWhiteSpace(pageRequest.RegexExpression))
-        {
-            query = query.Where(x => EF.Functions.Like(x.Name, pageRequest.RegexExpression) ||
-                                     EF.Functions.Like(x.Description, pageRequest.RegexExpression) ||
-                                     EF.Functions.Like(x.TaskNumber, pageRequest.RegexExpression));
-        }
-
-        if (!string.IsNullOrWhiteSpace(pageRequest.Attribute))
-        {
-            var property = typeof(Task).GetProperty(pageRequest.Attribute);
-            if (property != null)
+            if (request.PageRequestFilters.Select(s => s.Propriety).Contains("AssignedUsers"))
             {
-                query = pageRequest.Descending
-                    ? query.OrderByDescending(x => property.GetValue(x, null))
-                    : query.OrderBy(x => property.GetValue(x, null));
+                query = await CustomFilterTask(query, request);
+                request.PageRequestFilters = request.PageRequestFilters.Where(s => s.Propriety != "AssignedUsers");
             }
+
+            var queryTest = query
+                .Select(s => new GetTaskViewModel
+                {
+                    Id = s.Id,
+                    TaskNumber = s.TaskNumber,
+                    StartDate = s.StartDate,
+                    EndDate = s.EndDate,
+                    Description = s.Description,
+                    Name = s.Name,
+                    Status = s.Status,
+                    TaskPriority = s.TaskPriority,
+                    IsDeleted = s.IsDeleted,
+                    UserId = s.UserId,
+                    Author = s.Author,
+                    LeadId = s.LeadId,
+                    OrganizationId = s.OrganizationId,
+                    AgreementId = s.AgreementId,
+                    AgreementName = s.AgreementId.HasValue ? 
+                        allAgreementsRequest.FirstOrDefault(i => i.Id == s.AgreementId.Value) == null ? "" : allAgreementsRequest.FirstOrDefault(i => i.Id == s.AgreementId.Value).Name
+                        : "",
+                    TaskTypeId = s.TaskTypeId,
+                    TaskType = s.TaskType,
+                    LeadName = s.LeadId.HasValue ?
+                        allLeadsRequest.FirstOrDefault(i => i.Id == s.LeadId.Value) == null ? "" : allLeadsRequest.FirstOrDefault(i => i.Id == s.LeadId.Value).Name
+                        : "",
+                    LeadPipeLine = s.LeadId.HasValue ?
+                        allLeadsRequest.FirstOrDefault(i => i.Id == s.LeadId.Value) == null ? "" : allLeadsRequest.FirstOrDefault(i => i.Id == s.LeadId.Value).PipeLine.Name
+                        : "",
+                    OrganizationName = s.OrganizationId.HasValue ?
+                        allOrganizationRequest.FirstOrDefault(i => i.Id == s.OrganizationId.Value) == null ? "" : allOrganizationRequest.FirstOrDefault(i => i.Id == s.OrganizationId.Value).Name
+                        : ""
+                });
+
+            var paginatedResult = await queryTest.GetPagedAsync(request);
+
+            return new SuccessResultModel<PagedResult<GetTaskViewModel>>(paginatedResult);
         }
-
-        if (pageRequest.PageRequestFilters.Any())
-        {
-            query = query.FilterSourceByFilters(pageRequest.PageRequestFilters);
-        }
-    }
-
-    var result = await query.Select(x => new GetTaskViewModel
-    {
-        Id = x.Id,
-        Name = x.Name,
-        Description = x.Description,
-        StartDate = x.StartDate,
-        EndDate = x.EndDate,
-        UserId = x.UserId,
-        UserName = x.User != null ? x.User.UserName : "",
-        TaskPriority = x.TaskPriority,
-        Status = x.Status,
-        TaskNumber = x.TaskNumber,
-        TaskType = x.TaskType.Name,
-        TaskItems = x.TaskItems.Select(y => new GetTaskItemViewModel
-        {
-            Id = y.Id,
-            Name = y.Name,
-            Description = y.Description,
-            AssignedUsers = y.AssignedUsers.Select(z => z.User).ToList(),
-            Status = y.Status,
-            TaskId = y.TaskId
-        }).ToList(),
-        AssignedUsers = x.AssignedUsers.Select(y => new TaskAssignedUserViewModel
-        {
-            UserId = y.UserId,
-            TaskId = y.TaskId
-        }).ToList(),
-        Files = x.Files,
-        LeadId = x.LeadId,
-        OrganizationId = x.OrganizationId,
-        TaskTypeId = x.TaskTypeId,
-        AgreementId = x.AgreementId
-    }).GetPagedAsync(pageRequest?.Page ?? 1, pageRequest?.PageSize ?? 10);
-
-    return result;
-}
 
         public async Task<ResultModel<PagedResult<GetTaskViewModel>>> GetTaskByLeadIdAsync(Guid? leadId, PageRequest request)
         {
