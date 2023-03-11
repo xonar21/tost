@@ -20,6 +20,7 @@ using Task = GR.TaskManager.Abstractions.Models.Task;
 using GR.Email.Abstractions;
 using Microsoft.AspNetCore.Mvc;
 using GR.Crm.Organizations.Abstractions;
+using GR.Identity.Abstractions;
 
 namespace GR.TaskManager.Services
 {
@@ -244,6 +245,7 @@ namespace GR.TaskManager.Services
 
             var query = _context.Tasks
                 .Include(x => x.AssignedUsers)
+                .ThenInclude(x => x.User)
                 .Include(i => i.TaskType)
                 .Where(x => !x.IsDeleted || includeDeleted);
 
